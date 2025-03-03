@@ -146,14 +146,42 @@ docker-compose up -d
 
 ---
 
-## Customizations
+## API references
 
-### Environment Variables
-All credentials, database configurations, and paths can be modified directly in the `docker-compose.yml` file.
+POST /wallet/verify
 
-### Adding Kafka Topics
-New topics can be defined and managed using Kafka UI or the Kafka CLI tool directly inside the container.
+URL: http://localhost:8084/wallet/verify
 
+request body:
+```json
+{
+    "user_id": 1,
+    "amount": 100.0,
+    "payment_method": "credit_card"
+}
+```
+response:
+```json
+{
+    "transaction_id": "txn-57909",
+    "user_id": 1,
+    "amount": 100,
+    "payment_method": "credit_card",
+    "status": "pending",
+    "balance": 0,
+    "prev_transaction_id": 0,
+    "prev_balance": 0,
+    "expired_at": "2025-03-03T13:52:34.960077+07:00"
+}
+```
+When user not found
+```json
+{
+    "error": "User not found"
+}
+```
+We can double-check on Kafka UI
+![screenshot](doc/kafka-001.png)
 ---
 
 ## License
