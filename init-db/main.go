@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -10,18 +11,20 @@ import (
 
 // Structs สำหรับ GORM
 type User struct {
-	ID      uint `gorm:"primaryKey"`
-	Balance int  `gorm:"not null;default:0"`
+	ID      uint    `gorm:"primaryKey"`
+	Balance float64 `gorm:"not null;default:0"`
 }
 
 type Transaction struct {
-	ID                uint   `gorm:"primaryKey"`
-	UserID            uint   `gorm:"not null;index"`
-	Amount            int    `gorm:"not null"`
-	Balance           int    `gorm:"not null"`
-	Status            string `gorm:"type:varchar(20);not null"`
-	PrevTransactionID *uint  `gorm:"index"`
-	PrevBalance       int    `gorm:"not null"`
+	ID                string    `gorm:"primaryKey"`
+	UserID            uint      `gorm:"not null;index"`
+	Amount            float64   `gorm:"not null"`
+	PaymentMethod     string    `gorm:"type:varchar(20);not null"`
+	Status            string    `gorm:"type:varchar(20);not null"`
+	Balance           float64   `gorm:"not null"`
+	PrevTransactionID string    `gorm:"not null;index"`
+	PrevBalance       float64   `gorm:"not null"`
+	ExpiredAt         time.Time `gorm:"not null"`
 }
 
 const (

@@ -2,35 +2,43 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 type User struct {
-	ID    uint   `gorm:"primaryKey"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	ID      uint `gorm:"primaryKey" json:"user_id"`
+	Balance int  `json:"balance"`
 }
 
 type Transaction struct {
-	ID            string    `gorm:"primaryKey" json:"transaction_id"`
+	ID                string    `gorm:"primaryKey" json:"transaction_id"`
+	UserID            uint      `json:"user_id"`
+	Amount            float64   `json:"amount"`
+	PaymentMethod     string    `json:"payment_method"`
+	Status            string    `json:"status"`
+	Balance           int       `json:"balance"`
+	PrevTransactionID string    `json:"prev_transaction_id"`
+	PrevBalance       int       `json:"prev_balance"`
+	ExpiredAt         time.Time `json:"expired_at"`
+}
+
+type TransactionMessage struct {
+	TransactionID string    `json:"transaction_id"`
 	UserID        uint      `json:"user_id"`
 	Amount        float64   `json:"amount"`
 	PaymentMethod string    `json:"payment_method"`
 	Status        string    `json:"status"`
 	ExpiredAt     time.Time `json:"expired_at"`
-}
-
-type TransactionMessage struct {
-	TransactionID string `json:"transaction_id"`
-	Status        string `json:"status"`
 }
 
 var db *gorm.DB
@@ -46,7 +54,6 @@ func initDB() {
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	db.AutoMigrate(&User{}, &Transaction{})
 }
 
 func initKafka() {
@@ -59,7 +66,7 @@ func initKafka() {
 
 func getWallet(c *gin.Context) {
 	var users []User
-	if err := db.Find(&users).Error; err != nil {
+	if err := db.Order("id").Find(&users).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -78,27 +85,50 @@ func verifyWallet(c *gin.Context) {
 		return
 	}
 
-	transactionID := uuid.New().String()
+	var user User
+	if err := db.First(&user, req.UserID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	transactionID := fmt.Sprintf("txn-%d", rand.Intn(100000))
 	expiredAt := time.Now().Add(5 * time.Minute)
 
 	transaction := Transaction{
-		ID:            transactionID,
-		UserID:        req.UserID,
-		Amount:        req.Amount,
-		PaymentMethod: req.PaymentMethod,
-		Status:        "pending",
-		ExpiredAt:     expiredAt,
+		ID:                transactionID,
+		UserID:            req.UserID,
+		Amount:            req.Amount,
+		PaymentMethod:     req.PaymentMethod,
+		Status:            "pending",
+		Balance:           0,
+		PrevTransactionID: transactionID,
+		PrevBalance:       0,
+		ExpiredAt:         expiredAt,
 	}
 
-	//if err := db.Create(&transaction).Error; err != nil {
-	//	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-	//	return
-	//}
+	if err := db.Create(&transaction).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 
+	publishMessage(transaction)
+
+	c.JSON(http.StatusOK, transaction)
+}
+
+func publishMessage(transaction Transaction) {
 	topic := Topic
 	message := TransactionMessage{
-		TransactionID: transactionID,
+		TransactionID: transaction.ID,
+		UserID:        transaction.UserID,
+		Amount:        transaction.Amount,
+		PaymentMethod: transaction.PaymentMethod,
 		Status:        transaction.Status,
+		ExpiredAt:     transaction.ExpiredAt,
 	}
 
 	msgBytes, err := json.Marshal(message)
@@ -117,8 +147,6 @@ func verifyWallet(c *gin.Context) {
 	} else {
 		log.Printf("Published: %s", string(msgBytes))
 	}
-
-	c.JSON(http.StatusOK, transaction)
 }
 
 func main() {
@@ -129,5 +157,9 @@ func main() {
 	r.GET("/wallet", getWallet)
 	r.POST("/wallet/verify", verifyWallet)
 
-	r.Run(":8084")
+	err := r.Run(":8084")
+	if err != nil {
+		log.Printf("Server start error: %v", err)
+		return
+	}
 }
