@@ -17,8 +17,8 @@ import (
 )
 
 type User struct {
-	ID      uint `gorm:"primaryKey" json:"user_id"`
-	Balance int  `json:"balance"`
+	ID      uint    `gorm:"primaryKey" json:"user_id"`
+	Balance float64 `json:"balance"`
 }
 
 type Transaction struct {
@@ -27,10 +27,12 @@ type Transaction struct {
 	Amount            float64   `json:"amount"`
 	PaymentMethod     string    `json:"payment_method"`
 	Status            string    `json:"status"`
-	Balance           int       `json:"balance"`
+	Balance           float64   `json:"balance"`
 	PrevTransactionID string    `json:"prev_transaction_id"`
-	PrevBalance       int       `json:"prev_balance"`
+	PrevBalance       float64   `json:"prev_balance"`
 	ExpiredAt         time.Time `json:"expired_at"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type TransactionMessage struct {
@@ -139,8 +141,9 @@ func verifyWallet(c *gin.Context) {
 		return
 	}
 
-	transactionID := fmt.Sprintf("txn-%d", rand.Intn(100000))
+	transactionID := fmt.Sprintf("txn-%d%d", time.Now().Unix(), rand.Intn(10000))
 	expiredAt := time.Now().Add(5 * time.Minute)
+	createdAt := time.Now()
 
 	transaction := Transaction{
 		ID:                transactionID,
@@ -149,9 +152,11 @@ func verifyWallet(c *gin.Context) {
 		PaymentMethod:     req.PaymentMethod,
 		Status:            "pending",
 		Balance:           0,
-		PrevTransactionID: transactionID,
+		PrevTransactionID: "none",
 		PrevBalance:       0,
 		ExpiredAt:         expiredAt,
+		CreatedAt:         createdAt,
+		UpdatedAt:         createdAt,
 	}
 
 	if err := db.Create(&transaction).Error; err != nil {
@@ -161,6 +166,53 @@ func verifyWallet(c *gin.Context) {
 	}
 
 	publishMessage(transaction)
+
+	c.JSON(http.StatusOK, transaction)
+}
+
+func confirmWallet(c *gin.Context) {
+	var req struct {
+		TransactionID string `json:"transaction_id"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var transaction Transaction
+	if err := db.Where("id = ?", req.TransactionID).First(&transaction).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			sendLogToGraylog(3, "TRANSACTION_NOT_FOUND", map[string]interface{}{"error": "Transaction not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "Transaction not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+
+		return
+	}
+
+	if transaction.Status != "completed" {
+		if transaction.Status == "verified" {
+			result := db.Model(&Transaction{}).Where("id = ?", transaction.ID).Updates(map[string]interface{}{
+				"status":     "confirming",
+				"updated_at": time.Now(),
+			})
+
+			if result.Error != nil {
+				log.Printf("Failed to update transaction status: %v", result.Error)
+			} else {
+				transaction.Status = "confirming"
+				publishMessage(transaction)
+			}
+		}
+
+		c.JSON(http.StatusBadRequest, gin.H{
+			"transaction_id": transaction.ID,
+			"message":        "Transaction is not completed",
+		})
+		return
+	}
 
 	c.JSON(http.StatusOK, transaction)
 }
@@ -201,6 +253,7 @@ func main() {
 	r := gin.Default()
 	r.GET("/wallet", getWallet)
 	r.POST("/wallet/verify", verifyWallet)
+	r.POST("/wallet/confirm", confirmWallet)
 
 	err := r.Run(":8084")
 	if err != nil {

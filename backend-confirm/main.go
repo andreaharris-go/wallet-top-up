@@ -19,10 +19,12 @@ type Transaction struct {
 	Amount            float64   `json:"amount"`
 	PaymentMethod     string    `json:"payment_method"`
 	Status            string    `json:"status"`
-	Balance           int       `json:"balance"`
+	Balance           float64   `json:"balance"`
 	PrevTransactionID string    `json:"prev_transaction_id"`
-	PrevBalance       int       `json:"prev_balance"`
+	PrevBalance       float64   `json:"prev_balance"`
 	ExpiredAt         time.Time `json:"expired_at"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type TransactionMessage struct {
@@ -79,9 +81,14 @@ func consumeKafka() {
 	for {
 		msg, err := consumer.ReadMessage(-1)
 		if err == nil {
+			log.Printf("Received message: %s\n", string(msg.Value))
 			var txn TransactionMessage
 			if err := json.Unmarshal(msg.Value, &txn); err != nil {
 				log.Printf("Failed to parse Kafka message: %v", err)
+				continue
+			}
+
+			if txn.Status == "verified" || txn.Status == "completed" {
 				continue
 			}
 
@@ -91,26 +98,80 @@ func consumeKafka() {
 				continue
 			}
 			if exists > 0 {
-				log.Printf("Transaction %s already processed", txn.TransactionID)
+				log.Printf("Transaction %s already processed status: %s", txn.TransactionID, txn.Status)
 				continue
 			}
 
-			redisClient.Set(ctx, txn.TransactionID, "processed", 10*time.Minute)
+			err = redisClient.Set(ctx, txn.TransactionID, "processed", 10*time.Minute).Err()
+			if err != nil {
+				log.Fatalf("Set error: %v", err)
+			}
 
-			result := db.Model(&Transaction{}).Where("id = ?", txn.TransactionID).Update("status", "completed")
-			if result.Error != nil {
-				log.Printf("Failed to update transaction status: %v", result.Error)
+			var transaction Transaction
+			db.Where("id = ?", txn.TransactionID).First(&transaction)
+			if transaction.ID == "" {
+				log.Printf("Transaction %s not found", txn.TransactionID)
 				continue
 			}
 
-			publishKafka(txn.TransactionID)
+			if transaction.Status == "confirming" {
+				log.Printf("Transaction %s not confirming", txn.TransactionID)
+				result := db.Model(&Transaction{}).Where("id = ?", txn.TransactionID).Updates(map[string]interface{}{
+					"status":     "completed",
+					"updated_at": time.Now(),
+				})
+
+				if result.Error != nil {
+					log.Printf("Failed to update transaction status: %v", result.Error)
+				} else {
+					publishKafka(txn.TransactionID, "completed")
+
+					if err := redisClient.Del(ctx, txn.TransactionID).Err(); err != nil {
+						log.Printf("Failed to delete Redis key for TransactionID %s: %v", txn.TransactionID, err)
+						continue
+					}
+				}
+
+				continue
+			}
+
+			if transaction.Status == "pending" {
+				var prevTransaction Transaction
+				db.Where("user_id = ? AND status = ?", transaction.UserID, "completed").Order("created_at DESC").First(&prevTransaction)
+				if prevTransaction.ID == "" {
+					log.Printf("Prev Transaction %s not found", txn.TransactionID)
+					continue
+				}
+
+				result := db.Model(&Transaction{}).Where("id = ?", txn.TransactionID).Updates(map[string]interface{}{
+					"status":              "verified",
+					"balance":             prevTransaction.Balance + txn.Amount,
+					"prev_transaction_id": prevTransaction.ID,
+					"prev_balance":        prevTransaction.Balance,
+					"updated_at":          time.Now(),
+				})
+
+				if result.Error != nil {
+					log.Printf("Failed to update transaction status: %v", result.Error)
+					continue
+				} else {
+					log.Printf("Transaction %s verified", txn.TransactionID)
+
+					err = redisClient.Del(ctx, txn.TransactionID).Err()
+					if err != nil {
+						log.Fatalf("Delete error: %v", err)
+					}
+
+					publishKafka(txn.TransactionID, "verified")
+				}
+			}
 		} else {
 			log.Printf("Consumer error: %v", err)
 		}
 	}
 }
 
-func publishKafka(transactionID string) {
+func publishKafka(transactionID string, status string) {
 	producer, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": KafkaBroker})
 	if err != nil {
 		log.Fatalf("Failed to create Kafka producer: %v", err)
@@ -119,7 +180,7 @@ func publishKafka(transactionID string) {
 
 	msg := map[string]interface{}{
 		"transaction_id": transactionID,
-		"status":         "completed",
+		"status":         status,
 	}
 	value, _ := json.Marshal(msg)
 
