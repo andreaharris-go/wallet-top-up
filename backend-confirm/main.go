@@ -19,10 +19,12 @@ type Transaction struct {
 	Amount            float64   `json:"amount"`
 	PaymentMethod     string    `json:"payment_method"`
 	Status            string    `json:"status"`
-	Balance           int       `json:"balance"`
+	Balance           float64   `json:"balance"`
 	PrevTransactionID string    `json:"prev_transaction_id"`
-	PrevBalance       int       `json:"prev_balance"`
+	PrevBalance       float64   `json:"prev_balance"`
 	ExpiredAt         time.Time `json:"expired_at"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type TransactionMessage struct {
@@ -97,7 +99,21 @@ func consumeKafka() {
 
 			redisClient.Set(ctx, txn.TransactionID, "processed", 10*time.Minute)
 
-			result := db.Model(&Transaction{}).Where("id = ?", txn.TransactionID).Update("status", "completed")
+			var transaction Transaction
+			db.Where("user_id = ? AND status = ?", 1, "completed").Order("created_at DESC").First(&transaction)
+			if transaction.ID == "" {
+				log.Printf("Transaction %s not found", txn.TransactionID)
+				return
+			}
+
+			result := db.Model(&Transaction{}).Where("id = ?", txn.TransactionID).Updates(map[string]interface{}{
+				"status":              "verified",
+				"balance":             transaction.Balance + txn.Amount,
+				"prev_transaction_id": transaction.ID,
+				"prev_balance":        transaction.Balance,
+				"updated_at":          time.Now(),
+			})
+
 			if result.Error != nil {
 				log.Printf("Failed to update transaction status: %v", result.Error)
 				continue
