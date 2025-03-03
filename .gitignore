@@ -1,0 +1,33 @@
+# Node.js / Next.js
+node_modules/
+.next/
+out/
+*.log
+yarn.lock
+package-lock.json
+.env*
+.vercel/
+.npm/
+.DS_Store
+
+# Golang
+bin/
+obj/
+*.exe
+*.out
+*.test
+vendor/
+*.mod
+*.sum
+/go/
+.env*
+
+# Docker
+docker-compose.override.yml
+*.env
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
