@@ -170,6 +170,53 @@ func verifyWallet(c *gin.Context) {
 	c.JSON(http.StatusOK, transaction)
 }
 
+func confirmWallet(c *gin.Context) {
+	var req struct {
+		TransactionID string `json:"transaction_id"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var transaction Transaction
+	if err := db.Where("id = ?", req.TransactionID).First(&transaction).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			sendLogToGraylog(3, "TRANSACTION_NOT_FOUND", map[string]interface{}{"error": "Transaction not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "Transaction not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+
+		return
+	}
+
+	if transaction.Status != "completed" {
+		if transaction.Status == "verified" {
+			result := db.Model(&Transaction{}).Where("id = ?", transaction.ID).Updates(map[string]interface{}{
+				"status":     "confirming",
+				"updated_at": time.Now(),
+			})
+
+			if result.Error != nil {
+				log.Printf("Failed to update transaction status: %v", result.Error)
+			} else {
+				transaction.Status = "confirming"
+				publishMessage(transaction)
+			}
+		}
+
+		c.JSON(http.StatusBadRequest, gin.H{
+			"transaction_id": transaction.ID,
+			"message":        "Transaction is not completed",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, transaction)
+}
+
 func publishMessage(transaction Transaction) {
 	topic := Topic
 	message := TransactionMessage{
@@ -206,6 +253,7 @@ func main() {
 	r := gin.Default()
 	r.GET("/wallet", getWallet)
 	r.POST("/wallet/verify", verifyWallet)
+	r.POST("/wallet/confirm", confirmWallet)
 
 	err := r.Run(":8084")
 	if err != nil {
