@@ -25,6 +25,8 @@ type Transaction struct {
 	PrevTransactionID string    `gorm:"not null;index"`
 	PrevBalance       float64   `gorm:"not null"`
 	ExpiredAt         time.Time `gorm:"not null"`
+	CreatedAt         time.Time `gorm:"not null"`
+	UpdatedAt         time.Time `gorm:"not null"`
 }
 
 const (
