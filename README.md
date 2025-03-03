@@ -6,6 +6,7 @@ This project is a modern development framework designed to integrate multiple se
 
 The architecture includes widely-used services like PostgreSQL for relational database management, Kafka for event-driven messaging, OpenSearch for real-time data analytics and search, Redis for caching, MongoDB for NoSQL storage, and Graylog for centralized logging. All services communicate within a unified network to provide a complete solution for data-driven, fault-tolerant applications.
 
+![screenshot](doc/wallet-001.jpg)
 ---
 
 ## Requirements
