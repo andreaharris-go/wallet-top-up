@@ -175,15 +175,17 @@ response:
     "expired_at": "2025-03-03T13:52:34.960077+07:00"
 }
 ```
+We can double-check on Kafka UI
+![screenshot](doc/kafka-001.png)
+---
 When user not found
 ```json
 {
     "error": "User not found"
 }
 ```
-We can double-check on Kafka UI
-![screenshot](doc/kafka-001.png)
----
+USER_NOT_FOUND log
+![screenshot](doc/log-user-not-found.png)
 
 ## License
 
