@@ -108,7 +108,21 @@ func consumeKafka() {
 
 			if transaction.Status == "confirming" {
 				log.Printf("Transaction %s not confirming", txn.TransactionID)
-				// TODO: make confirm
+				result := db.Model(&Transaction{}).Where("id = ?", txn.TransactionID).Updates(map[string]interface{}{
+					"status":     "completed",
+					"updated_at": time.Now(),
+				})
+
+				if result.Error != nil {
+					log.Printf("Failed to update transaction status: %v", result.Error)
+				} else {
+					publishKafka(txn.TransactionID, "completed")
+
+					if err := redisClient.Del(ctx, txn.TransactionID).Err(); err != nil {
+						log.Printf("Failed to delete Redis key for TransactionID %s: %v", txn.TransactionID, err)
+						continue
+					}
+				}
 
 				continue
 			}
