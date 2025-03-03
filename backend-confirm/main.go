@@ -81,9 +81,14 @@ func consumeKafka() {
 	for {
 		msg, err := consumer.ReadMessage(-1)
 		if err == nil {
+			log.Printf("Received message: %s\n", string(msg.Value))
 			var txn TransactionMessage
 			if err := json.Unmarshal(msg.Value, &txn); err != nil {
 				log.Printf("Failed to parse Kafka message: %v", err)
+				continue
+			}
+
+			if txn.Status == "verified" || txn.Status == "completed" {
 				continue
 			}
 
@@ -97,7 +102,10 @@ func consumeKafka() {
 				continue
 			}
 
-			redisClient.Set(ctx, txn.TransactionID, "processed", 10*time.Minute)
+			err = redisClient.Set(ctx, txn.TransactionID, "processed", 10*time.Minute).Err()
+			if err != nil {
+				log.Fatalf("Set error: %v", err)
+			}
 
 			var transaction Transaction
 			db.Where("id = ?", txn.TransactionID).First(&transaction)
@@ -147,13 +155,14 @@ func consumeKafka() {
 					log.Printf("Failed to update transaction status: %v", result.Error)
 					continue
 				} else {
-					log.Printf("Transaction %s updated", txn.TransactionID)
-					publishKafka(txn.TransactionID, "verified")
-				}
+					log.Printf("Transaction %s verified", txn.TransactionID)
 
-				if err := redisClient.Del(ctx, txn.TransactionID).Err(); err != nil {
-					log.Printf("Failed to delete Redis key for TransactionID %s: %v", txn.TransactionID, err)
-					continue
+					err = redisClient.Del(ctx, txn.TransactionID).Err()
+					if err != nil {
+						log.Fatalf("Delete error: %v", err)
+					}
+
+					publishKafka(txn.TransactionID, "verified")
 				}
 			}
 		} else {
