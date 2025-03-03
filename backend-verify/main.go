@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,8 +45,11 @@ type TransactionMessage struct {
 var db *gorm.DB
 var kafkaProducer *kafka.Producer
 
-const KafkaBroker = "localhost:9092"
-const Topic = "transaction"
+const (
+	KafkaBroker    = "localhost:9092"
+	Topic          = "transaction"
+	GraylogAddress = "http://graylog:12201/gelf"
+)
 
 func initDB() {
 	dsn := "host=localhost user=user password=password dbname=mydb port=5432 sslmode=disable"
@@ -62,6 +66,45 @@ func initKafka() {
 	if err != nil {
 		log.Fatalf("Failed to create Kafka producer: %v", err)
 	}
+}
+
+func sendLogToGraylog(level int8, message string, extra map[string]interface{}) {
+	logData := map[string]interface{}{
+		"host":          "localhost",
+		"short_message": message,
+		"timestamp":     time.Now().Unix(),
+		"level":         level,
+		"_custom_field": "production",
+		"version":       "1.1",
+	}
+
+	for k, v := range extra {
+		logData[k] = v
+	}
+
+	jsonData, err := json.Marshal(logData)
+	if err != nil {
+		log.Printf("Failed to marshal log data: %v", err)
+		return
+	}
+
+	req, err := http.NewRequest("POST", GraylogAddress, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("Failed to create request: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Failed to send log to Graylog: %v", err)
+	} else {
+		log.Printf("send log")
+		defer resp.Body.Close()
+	}
+
+	log.Printf("End log")
 }
 
 func getWallet(c *gin.Context) {
@@ -88,6 +131,7 @@ func verifyWallet(c *gin.Context) {
 	var user User
 	if err := db.First(&user, req.UserID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			sendLogToGraylog(3, "USER_NOT_FOUND", map[string]interface{}{"error": "User not found"})
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -111,6 +155,7 @@ func verifyWallet(c *gin.Context) {
 	}
 
 	if err := db.Create(&transaction).Error; err != nil {
+		sendLogToGraylog(3, "CREATE_TRANSACTION_ERROR", map[string]interface{}{"error": "Create error"})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
