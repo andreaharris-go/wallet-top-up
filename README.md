@@ -25,7 +25,7 @@ The architecture includes widely-used services like PostgreSQL for relational da
 - **Environment Variables**:
     - **POSTGRES_USER**: `user`
     - **POSTGRES_PASSWORD**: `password`
-    - **POSTGRES_DB**: `mydb`
+    - **POSTGRES_DB**: `wallet_db`
 
 ---
 

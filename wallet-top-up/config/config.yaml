@@ -1,0 +1,7 @@
+DB_HOST: "localhost"
+DB_USER: "user"
+DB_PASSWORD: "password"
+DB_NAME: "wallet_db"
+DB_PORT: "5432"
+
+KAFKA_BROKER: "localhost:9092"

@@ -50,7 +50,7 @@ const Topic = "transaction"
 
 func initDB() {
 	var err error
-	dsn := "host=localhost user=user password=password dbname=mydb port=5432 sslmode=disable"
+	dsn := "host=localhost user=user password=password dbname=wallet_db port=5432 sslmode=disable"
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)

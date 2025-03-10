@@ -33,7 +33,7 @@ const (
 	port     = 5432
 	user     = "user"
 	password = "password"
-	dbname   = "mydb"
+	dbname   = "wallet_db"
 )
 
 func main() {

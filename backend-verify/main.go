@@ -54,7 +54,7 @@ const (
 )
 
 func initDB() {
-	dsn := "host=localhost user=user password=password dbname=mydb port=5432 sslmode=disable"
+	dsn := "host=localhost user=user password=password dbname=wallet_db port=5432 sslmode=disable"
 	var err error
 	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
