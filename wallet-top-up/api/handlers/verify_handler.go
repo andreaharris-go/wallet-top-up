@@ -61,6 +61,7 @@ func VerifyHandler(db *gorm.DB, producer *kafka.Writer) gin.HandlerFunc {
 			Value: []byte("Transaction created"),
 		})
 		if err != nil {
+			fmt.Printf("Failed to publish Kafka message: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to publish Kafka message"})
 			return
 		}
